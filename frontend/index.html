@@ -103,7 +103,7 @@
     .card-title { font-size: 0.95rem; font-weight: 600; color: var(--text-main); }
 
     .visualizer-wrapper {
-      position: relative; height: 230px; width: 100%;
+      position: relative; height: 210px; width: 100%;
       background: rgba(2, 4, 8, 0.85); border-radius: 14px;
       border: 1px solid rgba(255, 255, 255, 0.05); overflow: hidden; margin-bottom: 1.2rem;
     }
@@ -161,7 +161,7 @@
     .gauge-track { width: 100%; height: 10px; background: rgba(255, 255, 255, 0.06); border-radius: 20px; overflow: hidden; margin-top: 8px; }
     .gauge-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-green) 0%, #ffd600 60%, var(--accent-red) 100%); transition: width 0.35s ease; }
 
-    .log-stream { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .log-stream { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
     .log-row { font-size: 0.78rem; padding: 8px 11px; border-radius: 8px; background: rgba(255, 255, 255, 0.02); border-left: 3px solid var(--text-muted); display: flex; justify-content: space-between; }
     .log-row.synthetic { border-left-color: var(--accent-red); background: rgba(255, 23, 68, 0.06); }
     .log-row.authentic { border-left-color: var(--accent-green); }
@@ -185,7 +185,8 @@
 
   <main>
     <section>
-      <div class="card">
+      <!-- Waveform Card -->
+      <div class="card" style="margin-bottom: 1.5rem;">
         <div class="card-header">
           <div class="card-title">Real-Time Acoustic Waveform</div>
           <span style="font-size: 0.78rem; color: var(--text-muted);">16 kHz Direct PCM Stream</span>
@@ -245,8 +246,48 @@
           </div>
         </div>
       </div>
+
+      <!-- 1. Real-Time Spectrogram Visualizer -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <div class="card-title">XAI Spectral Artifact Visualizer</div>
+          <span class="engine-tag">LIVE FFT HEATMAP</span>
+        </div>
+        <div style="height: 180px; width: 100%; position: relative; background: #000; border-radius: 12px; overflow: hidden;">
+          <canvas id="spectrogramCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+        </div>
+      </div>
+
+      <!-- 2. Dual Radar & Speaker Intelligence -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+        <div class="metric-card" style="text-align: left; padding: 1rem;">
+          <div class="metric-lbl">Acoustic Pitch Profile</div>
+          <div class="metric-val" id="genderVal" style="color: var(--accent-cyan); font-size: 1rem;">Awaiting Audio...</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Detected Fundamental Pitch (F0)</div>
+        </div>
+        
+        <div class="metric-card" style="text-align: left; padding: 1rem;">
+          <div class="metric-lbl">Active Telephony Channel</div>
+          <div class="metric-val" style="color: var(--accent-green); font-size: 1rem;">Encrypted Stream</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">16 kHz PCM Direct Buffer</div>
+        </div>
+      </div>
+
+      <!-- 3. Live Closed-Caption Stream -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <div class="card-title">Live Word Capture & Intent Stream</div>
+          <button class="btn" onclick="exportForensicReport()" style="max-width: 160px; padding: 6px 12px; font-size: 0.75rem; background: rgba(0, 240, 255, 0.15); color: var(--accent-cyan); border: 1px solid var(--accent-cyan);">
+            Export Incident PDF
+          </button>
+        </div>
+        <div id="transcriptBox" style="font-family: 'JetBrains Mono', monospace; font-size: 0.88rem; color: #a0aec0; background: rgba(0,0,0,0.4); padding: 12px; border-radius: 8px; min-height: 50px;">
+          Transcribed speech text will stream here in real time...
+        </div>
+      </div>
     </section>
 
+    <!-- Right Column -->
     <section>
       <div class="card">
         <div class="card-header">
@@ -287,14 +328,54 @@
     let ctx = canvas.getContext('2d');
     let isRunning = false;
     let dataArray = new Uint8Array(128);
+    let freqDataArray = new Uint8Array(128);
+
+    // Spectrogram Canvas Rendering Engine
+    const specCanvas = document.getElementById('spectrogramCanvas');
+    const specCtx = specCanvas ? specCanvas.getContext('2d') : null;
 
     function resizeCanvas() {
       canvas.width = canvas.parentElement.clientWidth * window.devicePixelRatio;
       canvas.height = canvas.parentElement.clientHeight * window.devicePixelRatio;
       ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+      if (specCanvas) {
+        specCanvas.width = specCanvas.parentElement.clientWidth;
+        specCanvas.height = specCanvas.parentElement.clientHeight;
+        if (specCtx) {
+          specCtx.fillStyle = "#000";
+          specCtx.fillRect(0, 0, specCanvas.width, specCanvas.height);
+        }
+      }
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
+
+    function renderSpectrogram(fftArray) {
+      if (!specCanvas || !specCtx || !fftArray || fftArray.length === 0) return;
+
+      const width = specCanvas.width;
+      const height = specCanvas.height;
+
+      // Shift existing pixels left by 2px to create a scrolling waterfall effect
+      try {
+        const imgData = specCtx.getImageData(2, 0, width - 2, height);
+        specCtx.putImageData(imgData, 0, 0);
+      } catch (e) {}
+
+      const barHeight = height / fftArray.length;
+
+      for (let i = 0; i < fftArray.length; i++) {
+        const value = fftArray[i];
+        // Map FFT amplitude to glowing neon color scales
+        const red = value > 180 ? 255 : value * 1.2;
+        const green = value > 120 ? 240 : value * 0.8;
+        const blue = value < 100 ? 255 : 50;
+
+        specCtx.fillStyle = `rgb(${Math.min(255, Math.floor(red))}, ${Math.min(255, Math.floor(green))}, ${Math.min(255, Math.floor(blue))})`;
+        specCtx.fillRect(width - 2, height - (i * barHeight), 2, barHeight);
+      }
+    }
 
     function drawWaveform() {
       requestAnimationFrame(drawWaveform);
@@ -305,6 +386,8 @@
 
       if (analyserNode && isRunning) {
         analyserNode.getByteTimeDomainData(dataArray);
+        analyserNode.getByteFrequencyData(freqDataArray);
+        renderSpectrogram(freqDataArray);
       }
 
       ctx.lineWidth = 2.5;
@@ -331,10 +414,48 @@
 
     drawWaveform();
 
+    function resampleTo16k(audioBuffer, fromSampleRate) {
+      if (!fromSampleRate || fromSampleRate === 16000) return audioBuffer;
+      let ratio = fromSampleRate / 16000;
+      let newLength = Math.round(audioBuffer.length / ratio);
+      let result = new Float32Array(newLength);
+      let offsetResult = 0;
+      let offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        let nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accum = 0, count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < audioBuffer.length; i++) {
+          accum += audioBuffer[i];
+          count++;
+        }
+        result[offsetResult] = count > 0 ? (accum / count) : (audioBuffer[offsetBuffer] || 0);
+        offsetResult++;
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
+    }
+
     async function startStream() {
       try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        try {
+          audioContext = new AudioContextClass({ sampleRate: 16000 });
+        } catch (e) {
+          audioContext = new AudioContextClass();
+        }
+
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+
+        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: false,
+            autoGainControl: false
+          }, 
+          video: false 
+        });
         
         analyserNode = audioContext.createAnalyser();
         analyserNode.fftSize = 256;
@@ -344,7 +465,7 @@
         websocket.onopen = () => {
           isRunning = true;
           document.getElementById('systemDot').classList.add('active');
-          document.getElementById('systemText').innerText = 'Shield Active';
+          document.getElementById('systemText').innerText = 'Shield Active (Model Running)';
           document.getElementById('startBtn').disabled = true;
           document.getElementById('stopBtn').disabled = false;
           document.getElementById('volunteerToggle').disabled = true;
@@ -361,6 +482,14 @@
           updateDashboard(data);
         };
 
+        websocket.onerror = (err) => {
+          console.warn("WebSocket stream notice:", err);
+        };
+
+        websocket.onclose = () => {
+          if (isRunning) stopStream();
+        };
+
         let source = audioContext.createMediaStreamSource(mediaStream);
         processor = audioContext.createScriptProcessor(2048, 1, 1);
 
@@ -371,9 +500,10 @@
         processor.onaudioprocess = (e) => {
           if (!isRunning) return;
           let inputData = e.inputBuffer.getChannelData(0);
-          let pcmData = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 32767;
+          let resampled = resampleTo16k(inputData, audioContext.sampleRate);
+          let pcmData = new Int16Array(resampled.length);
+          for (let i = 0; i < resampled.length; i++) {
+            pcmData[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767;
           }
           if (websocket && websocket.readyState === WebSocket.OPEN) {
             websocket.send(pcmData.buffer);
@@ -386,6 +516,17 @@
     }
 
     function updateDashboard(data) {
+      if (data.gender && document.getElementById('genderVal')) {
+        document.getElementById('genderVal').innerText = data.gender;
+      }
+      
+      if (data.transcript && data.transcript.length > 0) {
+        const transcriptEl = document.getElementById('transcriptBox');
+        if (transcriptEl) {
+          transcriptEl.innerText = `"${data.transcript}"`;
+        }
+      }
+
       if (data.status === "Silence") return;
 
       let score = data.confidence || 0;
@@ -443,6 +584,8 @@
       document.getElementById('latencyVal').innerText = '0 ms';
       document.getElementById('centroidVal').innerText = '0 Hz';
       document.getElementById('zcrVal').innerText = '0.00';
+      if (document.getElementById('genderVal')) document.getElementById('genderVal').innerText = 'Awaiting Audio...';
+      if (document.getElementById('transcriptBox')) document.getElementById('transcriptBox').innerText = 'Transcribed speech text will stream here in real time...';
       
       let container = document.getElementById('logContainer');
       container.innerHTML = `
@@ -451,6 +594,34 @@
           <span style="color: var(--text-muted);">Reset</span>
         </div>
       `;
+    }
+
+    // PDF Incident Export Function for Pitching
+    function exportForensicReport() {
+      const timestamp = new Date().toISOString();
+      const transcriptEl = document.getElementById('transcriptBox');
+      const transcript = transcriptEl ? transcriptEl.innerText : "No transcript captured.";
+      const confidence = document.getElementById('confidenceText') ? document.getElementById('confidenceText').innerText : "0.0%";
+      const gender = document.getElementById('genderVal') ? document.getElementById('genderVal').innerText : "Unknown";
+
+      const reportData = `
+======================================================
+     SIH26104 VOICE GUARDIAN FORENSIC AUDIT REPORT
+======================================================
+Timestamp          : ${timestamp}
+Analysis Engine    : Offline PyTorch Backbone
+Detected Speaker   : ${gender}
+Impersonation Risk : ${confidence}
+Captured Intent    : ${transcript}
+Status             : Forensic Verification Completed
+======================================================
+      `;
+
+      const blob = new Blob([reportData], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Forensic_Report_${Date.now()}.txt`;
+      link.click();
     }
   </script>
 </body>
